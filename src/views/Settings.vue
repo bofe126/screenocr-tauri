@@ -106,11 +106,17 @@ const config = ref<AppConfig>({
 
 onMounted(async () => {
   try {
-    const loadedConfig = await invoke('get_config')
+    const loadedConfig = await invoke('get_config') as any
     if (loadedConfig) {
-      config.value = loadedConfig as AppConfig
+      // 转换 Rust 的 snake_case 为 JavaScript 的 camelCase
+      config.value = {
+        ocrEngine: loadedConfig.ocr_engine || loadedConfig.ocrEngine || 'Tesseract',
+        triggerDelayMs: loadedConfig.trigger_delay_ms !== undefined ? loadedConfig.trigger_delay_ms : (loadedConfig.triggerDelayMs || 300),
+        hotkey: loadedConfig.hotkey || 'Alt',
+        autoCopy: loadedConfig.auto_copy !== undefined ? loadedConfig.auto_copy : (loadedConfig.autoCopy !== undefined ? loadedConfig.autoCopy : true)
+      }
     }
-    ElMessage.success('配置加载成功')
+    console.log('配置已加载:', config.value)
   } catch (error) {
     console.warn('使用默认配置:', error)
   }
@@ -118,8 +124,15 @@ onMounted(async () => {
 
 const saveConfig = async () => {
   try {
-    await invoke('update_config', { config: config.value })
-    ElMessage.success('配置已保存')
+    // 转换为 Rust 期望的 snake_case 格式
+    const backendConfig = {
+      ocr_engine: config.value.ocrEngine,
+      trigger_delay_ms: config.value.triggerDelayMs,
+      hotkey: config.value.hotkey,
+      auto_copy: config.value.autoCopy
+    }
+    await invoke('update_config', { config: backendConfig })
+    console.log('配置已保存:', backendConfig)
   } catch (error) {
     ElMessage.error('保存配置失败: ' + error)
   }
@@ -148,11 +161,33 @@ const clearHotkey = () => {
 
 const testOCR = async () => {
   try {
-    ElMessage.info('OCR 功能开发中...')
-    // const result = await invoke('trigger_screenshot')
-    // ElMessage.success('OCR 测试成功')
+    ElMessage.info('正在截图和识别，请稍候...')
+    
+    // 调用后端 OCR 命令
+    const result = await invoke('perform_ocr_on_screen') as {
+      text: string
+      confidence: number
+      language: string
+    }
+    
+    ElMessageBox.alert(
+      `<div style="max-height: 400px; overflow-y: auto; white-space: pre-wrap;">
+        <h3>识别结果</h3>
+        <p><strong>文本内容：</strong></p>
+        <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px;">${result.text}</pre>
+        <p><strong>识别置信度：</strong> ${(result.confidence * 100).toFixed(1)}%</p>
+        <p><strong>语言：</strong> ${result.language}</p>
+        <p><small>✅ 文本已自动复制到剪贴板</small></p>
+      </div>`,
+      'OCR 识别成功',
+      {
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '关闭'
+      }
+    )
   } catch (error) {
     ElMessage.error('OCR 测试失败: ' + error)
+    console.error('OCR 错误:', error)
   }
 }
 
@@ -180,21 +215,31 @@ const openHelp = () => {
   )
 }
 
-const resetConfig = () => {
-  ElMessageBox.confirm('确定要重置所有配置吗？', '警告', {
-    type: 'warning'
-  }).then(() => {
+const resetConfig = async () => {
+  try {
+    await ElMessageBox.confirm('确定要重置所有配置吗？', '警告', {
+      type: 'warning',
+      confirmButtonText: '确定',
+      cancelButtonText: '取消'
+    })
+    
+    // 调用后端重置命令
+    const resetResult = await invoke('reset_config') as any
+    
+    // 更新前端配置
     config.value = {
-      ocrEngine: 'Tesseract',
-      triggerDelayMs: 300,
-      hotkey: 'Alt',
-      autoCopy: true
+      ocrEngine: resetResult.ocr_engine || resetResult.ocrEngine || 'Tesseract',
+      triggerDelayMs: resetResult.trigger_delay_ms !== undefined ? resetResult.trigger_delay_ms : (resetResult.triggerDelayMs || 300),
+      hotkey: resetResult.hotkey || 'Alt',
+      autoCopy: resetResult.auto_copy !== undefined ? resetResult.auto_copy : (resetResult.autoCopy !== undefined ? resetResult.autoCopy : true)
     }
-    saveConfig()
-    ElMessage.success('配置已重置')
-  }).catch(() => {
-    // 用户取消
-  })
+    
+    ElMessage.success('配置已重置为默认值')
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('重置配置失败: ' + error)
+    }
+  }
 }
 </script>
 
