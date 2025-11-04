@@ -122,6 +122,69 @@ async fn perform_ocr_on_screen(
     })
 }
 
+#[tauri::command]
+async fn perform_ocr_on_region(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> Result<OcrResponse, String> {
+    println!("🔍 开始区域 OCR 识别: {}x{} at ({}, {})", width, height, x, y);
+    
+    // 获取配置
+    let config = {
+        let cfg = state.config.lock().unwrap();
+        cfg.clone()
+    };
+    
+    // 截图全屏
+    let capture = screenshot::capture_primary_screen()
+        .map_err(|e| format!("截图失败: {}", e))?;
+    
+    println!("📸 截图完成: {}x{}", capture.width, capture.height);
+    
+    // 裁剪区域
+    let region = screenshot::CaptureRegion {
+        x,
+        y,
+        width,
+        height,
+    };
+    
+    let cropped = screenshot::crop_region(&capture, &region)
+        .map_err(|e| format!("裁剪区域失败: {}", e))?;
+    
+    println!("✂️  区域裁剪完成: {}x{}", cropped.width, cropped.height);
+    
+    // OCR 识别
+    let engine = match config.ocr_engine.as_str() {
+        "WeChatOCR" => ocr::OcrEngine::WeChatOCR,
+        _ => ocr::OcrEngine::Tesseract,
+    };
+    
+    let ocr_result = ocr::perform_ocr(&cropped, engine).await
+        .map_err(|e| format!("OCR 识别失败: {}", e))?;
+    
+    println!("✅ OCR 完成，识别了 {} 个字符", ocr_result.text.len());
+    
+    // 自动复制到剪贴板
+    if config.auto_copy && !ocr_result.text.is_empty() {
+        if let Err(e) = app.clipboard_manager().write_text(ocr_result.text.clone()) {
+            eprintln!("⚠️  复制到剪贴板失败: {}", e);
+        } else {
+            println!("📋 已复制到剪贴板");
+        }
+    }
+    
+    Ok(OcrResponse {
+        text: ocr_result.text,
+        confidence: ocr_result.confidence,
+        language: ocr_result.language,
+    })
+}
+
 #[derive(Debug, Serialize)]
 struct CaptureResponse {
     width: u32,
@@ -249,7 +312,8 @@ fn main() {
             update_config,
             reset_config,
             capture_screen,
-            perform_ocr_on_screen
+            perform_ocr_on_screen,
+            perform_ocr_on_region
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

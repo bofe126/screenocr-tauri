@@ -155,13 +155,21 @@ const confirmSelection = async () => {
   recognizing.value = true
   
   try {
-    // TODO: 调用后端 OCR 识别选定区域
-    // 目前先调用全屏识别
-    const result = await invoke('perform_ocr_on_screen') as {
+    console.log('正在识别区域:', selectedArea.value)
+    
+    // 调用后端区域 OCR 识别
+    const result = await invoke('perform_ocr_on_region', {
+      x: selectedArea.value.x,
+      y: selectedArea.value.y,
+      width: selectedArea.value.width,
+      height: selectedArea.value.height
+    }) as {
       text: string
       confidence: number
       language: string
     }
+    
+    console.log('识别结果:', result)
     
     ElMessage.success(`识别成功！识别了 ${result.text.length} 个字符`)
     
@@ -171,6 +179,7 @@ const confirmSelection = async () => {
     // 发送结果事件
     emit('ocr-complete', result)
   } catch (error) {
+    console.error('OCR 识别错误:', error)
     ElMessage.error('OCR 识别失败: ' + error)
   } finally {
     recognizing.value = false
